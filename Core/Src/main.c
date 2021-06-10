@@ -22,7 +22,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "math.h"
+#include <stdio.h>
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,10 +53,56 @@ TIM_HandleTypeDef htim11;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+int run = 0;
+int mode = 0;
+
+//SIN
+float SIN_Freq = 0;
+float SIN_Amplitude = 0;
+float SIN_High = 3.3;
+float SIN_Low = 0;
+
+//Ramp
+float SAW_Freq = 0;
+int SAW_mode = 0;
+float SAW_Amplitude = 0;
+float SAW_High = 3.3;
+float SAW_Low = 0;
+
+//Square
+float SQR_Freq = 0;
+int duty_cycle = 50;
+int SQR_mode = 0;
+float SQR_High = 3.3;
+float SQR_Low = 0;
+
 uint16_t ADCin = 0;
+float VADCin = 0;
 uint64_t _micro = 0;
-uint16_t dataOut = 0;
-	uint8_t DACConfig = 0b0011;
+float dataOut = 0;
+uint16_t uintdataOut = 0;
+uint8_t DACConfig = 0b0011;
+
+
+enum System
+{
+	System_Start,
+	System_Main_Print,
+	System_Main_input,
+	System_SIN_Print,
+	System_SIN_input,
+	System_Ramp_Print,
+	System_Ramp_input,
+	System_Sqr_Print,
+	System_Sqr_input
+};
+
+char TxDataBuffer[100] =
+{ 0 };
+char RxDataBuffer[32] =
+{ 0 };
+uint8_t System_State = System_Start;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -69,6 +117,7 @@ static void MX_TIM11_Init(void);
 /* USER CODE BEGIN PFP */
 void MCP4922SetOutput(uint8_t Config, uint16_t DACOutput);
 uint64_t micros();
+int16_t UARTRecieveIT();
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -116,25 +165,688 @@ int main(void)
 	HAL_ADC_Start_DMA(&hadc1, (uint32_t*) &ADCin, 1);
 
 	HAL_GPIO_WritePin(LOAD_GPIO_Port, LOAD_Pin, GPIO_PIN_RESET);
+	{
+	char temp[]="\r\n\r\nHELLO WORLD\r\n please type something to test System\r\n\r\n\r\n";
+	HAL_UART_Transmit(&huart2, (uint8_t*)temp, strlen(temp),10);
+	}
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 	while (1)
 	{
+//		Variable
 		static uint64_t timestamp = 0;
-		if (micros() - timestamp > 100)
+		static uint64_t Graphtimestamp = 0;
+
+//		IT init
+		HAL_UART_Receive_IT(&huart2,  (uint8_t*)RxDataBuffer, 32);
+
+//		IT 1 char
+		int16_t inputchar = UARTRecieveIT();
+		if(inputchar!=-1)
+		{
+			char TxDataBuffer[100] = { 0 };
+			sprintf(TxDataBuffer, "\r\nReceivedChar:[%c]\r\n", inputchar);
+			HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+		}
+
+//		State
+		char TxDataBuffer[100] = { 0 };
+
+		switch(System_State)
+		{
+			case System_Start:
+				System_State = System_Main_Print;
+				run = 1;
+				break;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+			case System_Main_Print:
+				sprintf(TxDataBuffer, ":MainMenu: \r\n a. Sine wave configuration \r\n s. Ramp wave configuration \r\n d. Square wave configuration \r\n\r\n\r\n");
+				HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+				System_State = System_Main_input;
+				break;
+			case System_Main_input:
+				switch(inputchar)
+				{
+				case 'a':
+					System_State = System_SIN_Print;
+					mode = 1;
+					run = 0;
+
+					SIN_Freq = 0;
+					SIN_Amplitude = 0;
+					SIN_High = 3.3;
+					SIN_Low = 0;
+
+					Graphtimestamp = micros();
+					break;
+				case 's':
+					System_State = System_Ramp_Print;
+					mode = 2;
+					run = 0;
+
+					SAW_Freq = 0;
+					SAW_mode = 0;
+					SAW_High = 3.3;
+					SAW_Low = 0;
+
+					break;
+				case 'd':
+					System_State = System_Sqr_Print;
+					mode = 3;
+					run = 0;
+
+					SQR_Freq = 0;
+					duty_cycle = 50;
+					SQR_mode = 0;
+					SQR_High = 3.3;
+					SQR_Low = 0;
+
+					Graphtimestamp = micros();
+					break;
+				case -1:
+					break;
+				default:
+					sprintf(TxDataBuffer, "Please press the correct button \r\n");
+					HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					System_State = System_Main_Print;
+					break;
+				}
+				break;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+			case System_SIN_Print:
+				sprintf(TxDataBuffer, ":SINMenu: \r\n a. + 0.1 Hz       s. - 0.1 Hz \r\n d. High + 0.1 V   z. High - 0.1 V \r\n x. Low + 0.1 V    c. Low - 0.1 V \r\n w. On/Off         q. Back \r\n\r\n\r\n");
+				HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+				System_State = System_SIN_input;
+				break;
+			case System_SIN_input:
+				switch(inputchar)
+				{
+				case 'a':
+					Graphtimestamp = micros();
+					if(SIN_Freq + 0.1 <= 10)
+					{
+						SIN_Freq += 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Frequency is at Maximum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_SIN_Print;
+					break;
+				case 's':
+					Graphtimestamp = micros();
+					if(SIN_Freq - 0.1 >= 0)
+					{
+						SIN_Freq -= 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Frequency is at Minimum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_SIN_Print;
+					break;
+				case 'd':
+					if(SIN_High + 0.1 <= 3.3)
+					{
+						SIN_High += 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Voltage High is at Maximum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_SIN_Print;
+					break;
+				case 'z':
+					if(SIN_High - 0.1 >= SIN_Low)
+					{
+						SIN_High -= 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Voltage High is at Voltage Low \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_SIN_Print;
+					break;
+				case 'x':
+					if(SIN_Low + 0.1 <= SIN_High)
+					{
+						SIN_Low += 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Voltage Low is at Voltage High \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_SIN_Print;
+					break;
+				case 'c':
+					if(SIN_Low - 0.1 >= 0)
+					{
+						SIN_Low -= 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Voltage Low is at Minimum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_SIN_Print;
+					break;
+				case 'w':
+					if(run == 1)
+					{
+						run = 0;
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Turning wave off\r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+						System_State = System_SIN_Print;
+					}
+					else if(run == 0)
+					{
+						run = 1;
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Turning wave on\r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+						System_State = System_SIN_Print;
+					}
+					break;
+				case 'q':
+					System_State = System_Main_Print;
+					mode = 0;
+					run = 0;
+					break;
+				case -1:
+					break;
+				default:
+					sprintf(TxDataBuffer, "Please press the correct button \r\n");
+					HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					System_State = System_SIN_Print;
+					break;
+				}
+				break;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+			case System_Ramp_Print:
+				sprintf(TxDataBuffer, ":RampMenu: \r\n a. + 0.1 Hz       s. - 0.1 Hz \r\n d. High + 0.1 V   z. High - 0.1 V \r\n x. Low + 0.1 V    c. Low - 0.1 V \r\n e. Ramp Style \r\n w. On/Off         q. Back \r\n\r\n\r\n");
+				HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+				System_State = System_Ramp_input;
+				break;
+			case System_Ramp_input:
+				switch(inputchar)
+				{
+				case 'a':
+					if(SAW_Freq + 0.1 <= 10)
+					{
+						SAW_Freq += 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Frequency is at Maximum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Ramp_Print;
+					break;
+				case 's':
+					if(SAW_Freq - 0.1 >= 0)
+					{
+						SAW_Freq -= 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Frequency is at Minimum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Ramp_Print;
+					break;
+				case 'd':
+					if(SAW_High + 0.1 <= 3.3)
+					{
+						SAW_High += 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Voltage High is at Maximum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Ramp_Print;
+					break;
+				case 'z':
+					if(SAW_High - 0.1 >= SAW_Low)
+					{
+						SAW_High -= 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Voltage High is at Voltage Low \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Ramp_Print;
+					break;
+				case 'x':
+					if(SAW_Low + 0.1 <= SAW_High)
+					{
+						SAW_Low += 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Voltage Low is at Voltage High \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Ramp_Print;
+					break;
+				case 'c':
+					if(SAW_Low - 0.1 >= 0)
+					{
+						SAW_Low -= 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Voltage Low is at Minimum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Ramp_Print;
+					break;
+				case 'e':
+					if(SAW_mode == 1)
+					{
+						SAW_mode = 0;
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Forward ramp\r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+						System_State = System_Ramp_Print;
+					}
+					else if(SAW_mode == 0)
+					{
+						SAW_mode = 1;
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Backward ramp\r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+						System_State = System_Ramp_Print;
+					}
+					break;
+				case 'w':
+					if(run == 1)
+					{
+						run = 0;
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Turning wave off\r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+						System_State = System_Ramp_Print;
+					}
+					else if(run == 0)
+					{
+						run = 1;
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Turning wave on\r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+						System_State = System_Ramp_Print;
+					}
+					break;
+				case 'q':
+					System_State = System_Main_Print;
+					mode = 0;
+					run = 0;
+					break;
+				case -1:
+					break;
+				default:
+					sprintf(TxDataBuffer, "Please press the correct button \r\n");
+					HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					System_State = System_Ramp_Print;
+					break;
+				}
+				break;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+			case System_Sqr_Print:
+				sprintf(TxDataBuffer, ":SquareMenu: \r\n a. + 0.1 Hz       s. - 0.1 Hz \r\n d. High + 0.1 V   z. High - 0.1 V \r\n x. Low + 0.1 V    c. Low - 0.1 V \r\n e. Duty + 5       r. Duty - 5 \r\n w. On/Off         q. Back \r\n\r\n\r\n");
+				HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+				System_State = System_Sqr_input;
+				break;
+			case System_Sqr_input:
+				switch(inputchar)
+				{
+				case 'a':
+					Graphtimestamp = micros();
+					SQR_mode = 0;
+					if(SQR_Freq + 0.1 <= 10)
+					{
+						SQR_Freq += 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Frequency is at Maximum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Sqr_Print;
+					break;
+				case 's':
+					Graphtimestamp = micros();
+					SQR_mode = 0;
+					if(SQR_Freq - 0.1 >= 0)
+					{
+						SQR_Freq -= 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Frequency is at Minimum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Sqr_Print;
+					break;
+				case 'd':
+					if(SQR_High + 0.1 <= 3.3)
+					{
+						SQR_High += 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Voltage High is at Maximum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Sqr_Print;
+					break;
+				case 'z':
+					if(SQR_High - 0.1 >= SQR_Low)
+					{
+						SQR_High -= 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Voltage High is at Voltage Low \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Sqr_Print;
+					break;
+				case 'x':
+					if(SQR_Low + 0.1 <= SQR_High)
+					{
+						SQR_Low += 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Voltage Low is at Voltage High \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Sqr_Print;
+					break;
+				case 'c':
+					if(SQR_Low - 0.1 >= 0)
+					{
+						SQR_Low -= 0.1;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Voltage Low is at Minimum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Sqr_Print;
+					break;
+				case 'e':
+					if(duty_cycle + 5 <= 100)
+					{
+						duty_cycle += 5;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Duty cycle is at Maximum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Sqr_Print;
+					break;
+				case 'r':
+					if(duty_cycle - 5 >= 0)
+					{
+						duty_cycle -= 5;
+//						char TxDataBuffer[100] = { 0 };
+//						sprintf(TxDataBuffer, "Frequency is %d Hz \r\n" , LED_Frequency);
+//						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					else
+					{
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Duty cycle is at Minimum \r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					}
+					System_State = System_Sqr_Print;
+					break;
+				case 'w':
+					if(run == 1)
+					{
+						run = 0;
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Turning wave off\r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+						System_State = System_Sqr_Print;
+					}
+					else if(run == 0)
+					{
+						run = 1;
+						char TxDataBuffer[100] = { 0 };
+						sprintf(TxDataBuffer, "Turning wave on\r\n");
+						HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+						System_State = System_Sqr_Print;
+					}
+					break;
+				case 'q':
+					System_State = System_Main_Print;
+					mode = 0;
+					run = 0;
+					break;
+				case -1:
+					break;
+				default:
+					sprintf(TxDataBuffer, "Please press the correct button \r\n");
+					HAL_UART_Transmit(&huart2, (uint8_t*)TxDataBuffer, strlen(TxDataBuffer), 1000);
+					System_State = System_Sqr_Print;
+					break;
+				}
+				break;
+
+		}
+
+//		run
+		if (micros() - timestamp > 1000)
 		{
 			timestamp = micros();
-			dataOut++;
-			dataOut %= 4096;
+			if(run == 1)
+			{
+				if(mode == 1)
+				{
+					SIN_Amplitude = (((SIN_High - SIN_Low)/3.3)*4095.0)/2.0;
+//					SinFunction
+					if(SIN_Freq <= 0.1)
+					{
+//						dataOut = (SIN_Amplitude + ((SIN_Low/3.3)*4095.0));
+						uintdataOut = dataOut;
+					}
+					else
+					{
+						dataOut = SIN_Amplitude*sin(2*M_PI*SIN_Freq*((micros() - Graphtimestamp)/1000000.0));
+						dataOut += (SIN_Amplitude + ((SIN_Low/3.3)*4095.0));
+						uintdataOut = dataOut;
+					}
+				}
+				else if(mode == 2)
+				{
+					SAW_Amplitude = ((SAW_High-SAW_Low)/3.3)*4095;
+//					Ramp
+					if(SAW_Freq <= 0.1)
+					{
+//						dataOut = ((SAW_Low/3.3)*4095.0) + (SAW_Amplitude/2.0);
+						uintdataOut = dataOut;
+
+					}
+					else
+					{
+						if(SAW_mode == 0)
+						{
+							dataOut += (SAW_Amplitude / (1/SAW_Freq)) * 0.001;
+							if(dataOut >= ((SAW_High/3.3)*4095.0))
+							{
+								dataOut = ((SAW_High/3.3)*4095.0);
+								uintdataOut = dataOut;
+								dataOut = ((SAW_Low/3.3)*4095.0) - ((SAW_Amplitude / (1/SAW_Freq)) * 0.001);
+							}
+							else
+							{
+								uintdataOut = dataOut;
+							}
+						}
+						else if(SAW_mode == 1)
+						{
+							dataOut -= (SAW_Amplitude / (1/SAW_Freq)) * 0.001;
+							if(dataOut <= ((SAW_Low/3.3)*4095.0))
+							{
+								dataOut = ((SAW_Low/3.3)*4095.0);
+								uintdataOut = dataOut;
+								dataOut = ((SAW_High/3.3)*4095.0) + ((SAW_Amplitude / (1/SAW_Freq)) * 0.001);
+							}
+							else
+							{
+								uintdataOut = dataOut;
+							}
+						}
+					}
+				}
+				else if(mode == 3)
+				{
+//					Square
+					if(SQR_Freq < 0.1)
+					{
+//						dataOut = 0;
+						uintdataOut = dataOut;
+					}
+					else
+					{
+						if(duty_cycle == 0)
+						{
+							dataOut = ((SQR_Low/3.3)*4095.0);
+							uintdataOut = dataOut;
+						}
+						else if(duty_cycle == 100)
+						{
+							dataOut = ((SQR_High/3.3)*4095.0);
+							uintdataOut = dataOut;
+						}
+						else if(micros() - Graphtimestamp >= ((duty_cycle/100.0)*(1/SQR_Freq))*1000000 && SQR_mode == 1)
+						{
+							Graphtimestamp = micros();
+							dataOut = ((SQR_Low/3.3)*4095.0);
+							uintdataOut = dataOut;
+							SQR_mode = 0;
+
+						}
+						else if(micros() - Graphtimestamp >= (((100 - duty_cycle)/100.0)*(1/SQR_Freq))*1000000 && SQR_mode == 0)
+						{
+							Graphtimestamp = micros();
+							dataOut = ((SQR_High/3.3)*4095.0);
+							uintdataOut = dataOut;
+							SQR_mode = 1;
+						}
+					}
+				}
+			}
+			else
+			{
+				dataOut = 0;
+				uintdataOut = dataOut;
+			}
 			if (hspi3.State == HAL_SPI_STATE_READY
 					&& HAL_GPIO_ReadPin(SPI_SS_GPIO_Port, SPI_SS_Pin)
 							== GPIO_PIN_SET)
 			{
-				MCP4922SetOutput(DACConfig, dataOut);
+				MCP4922SetOutput(DACConfig, uintdataOut);
 			}
 		}
+		VADCin = (ADCin)*(3.3/4095.0);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -198,8 +910,6 @@ static void MX_ADC1_Init(void)
 
   /* USER CODE END ADC1_Init 0 */
 
-  ADC_ChannelConfTypeDef sConfig = {0};
-
   /* USER CODE BEGIN ADC1_Init 1 */
 
   /* USER CODE END ADC1_Init 1 */
@@ -218,15 +928,6 @@ static void MX_ADC1_Init(void)
   hadc1.Init.DMAContinuousRequests = ENABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   if (HAL_ADC_Init(&hadc1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-  */
-  sConfig.Channel = ADC_CHANNEL_0;
-  sConfig.Rank = 1;
-  sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
-  if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
   }
@@ -482,6 +1183,18 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 inline uint64_t micros()
 {
 	return htim11.Instance->CNT + _micro;
+}
+
+int16_t UARTRecieveIT()
+{
+	static uint32_t dataPos =0;
+	int16_t data=-1;
+	if(huart2.RxXferSize - huart2.RxXferCount!=dataPos)
+	{
+		data=RxDataBuffer[dataPos];
+		dataPos= (dataPos+1)%huart2.RxXferSize;
+	}
+	return data;
 }
 /* USER CODE END 4 */
 
